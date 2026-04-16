@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fruit-checker-deployment
+spec:
+  replicas: 3  # Unit 4: Scaling - creates 3 instances of your AI
+  selector:
+    matchLabels:
+      app: fruit-checker
+  template:
+    metadata:
+      labels:
+        app: fruit-checker
+    spec:
+      containers:
+      - name: fruit-checker-container
+        image: fruit-app:latest
+        ports:
+        - containerPort: 8000
+        resources: # MLOps: Resource management
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fruit-checker-service
+spec:
+  type: LoadBalancer # Unit 4: Networking
+  ports:
+  - port: 80
+    targetPort: 8000
+  selector:
+    app: fruit-checker

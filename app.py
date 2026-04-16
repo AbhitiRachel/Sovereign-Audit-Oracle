@@ -1,77 +1,213 @@
 import streamlit as st
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from transformers import pipeline
+import requests
+from PIL import Image
+import pandas as pd
 
-st.title("📚 DPDP + Banking Laws Chatbot ")
+# ── Page Config ──────────────────────────────────────────────
+st.set_page_config(
+    page_title="Green-Grocer AI Dashboard",
+    page_icon="🍎",
+    layout="wide"
+)
 
-# Use caching so models and DB only load once, not on every user interaction
-@st.cache_resource
-def load_rag_components():
-    # Load embeddings
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+# ── Custom CSS ────────────────────────────────────────────────
+st.markdown("""
+<style>
+    .main { background-color: #0e1117; }
 
-    # Load DB (Ensure you have a folder named 'db' in your working directory)
-    db = FAISS.load_local("db", embeddings, allow_dangerous_deserialization=True)
-    retriever = db.as_retriever(search_kwargs={"k": 3})
+    .dashboard-title {
+        font-size: 2.5rem;
+        font-weight: 800;
+        color: #00ff88;
+        text-align: center;
+        padding: 1rem 0 0.2rem 0;
+    }
+    .dashboard-sub {
+        text-align: center;
+        color: #888;
+        font-size: 1rem;
+        margin-bottom: 2rem;
+    }
 
-    # Load model
-    pipe = pipeline(
-        "text-generation",
-        model="gpt2",
-        max_new_tokens=150,
-        pad_token_id=50256 # Added to suppress a common warning with GPT-2
-    )
-    
-    return retriever, pipe
+    /* Metric Cards */
+    .metric-card {
+        background: #1a1d27;
+        border-radius: 12px;
+        padding: 1.2rem;
+        text-align: center;
+        border: 1px solid #2a2d3a;
+    }
+    .metric-value {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #00ff88;
+    }
+    .metric-label {
+        font-size: 0.85rem;
+        color: #888;
+        margin-top: 0.3rem;
+    }
 
-# Load components
-try:
-    retriever, pipe = load_rag_components()
-except Exception as e:
-    st.error(f"Failed to load the database or models: {e}")
-    st.stop()
+    /* Verdict Banner */
+    .verdict-pass {
+        background: linear-gradient(135deg, #00ff8822, #00ff8811);
+        border: 1px solid #00ff88;
+        border-radius: 12px;
+        padding: 1rem 2rem;
+        text-align: center;
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #00ff88;
+        margin: 1rem 0;
+    }
+    .verdict-fail {
+        background: linear-gradient(135deg, #ff444422, #ff444411);
+        border: 1px solid #ff4444;
+        border-radius: 12px;
+        padding: 1rem 2rem;
+        text-align: center;
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #ff4444;
+        margin: 1rem 0;
+    }
 
-# User Input
-query = st.text_input("Ask your question:")
+    /* Grade Badges */
+    .badge-a {
+        background: #00ff8822;
+        color: #00ff88;
+        border: 1px solid #00ff88;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .badge-b {
+        background: #ffaa0022;
+        color: #ffaa00;
+        border: 1px solid #ffaa00;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .badge-c {
+        background: #ff444422;
+        color: #ff4444;
+        border: 1px solid #ff4444;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
 
-# Execution block: Only runs when the user submits a query
-if query:
-    with st.spinner("Searching documents and generating response..."):
-        # 1. Retrieve documents based on the query
-        docs = retriever.invoke(query)
+    .section-header {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #ccc;
+        border-bottom: 1px solid #2a2d3a;
+        padding-bottom: 0.5rem;
+        margin: 1.5rem 0 1rem 0;
+    }
 
-        # 2. Extract and combine the text context
-        context = " ".join([doc.page_content for doc in docs])
+    .latency-bar {
+        background: #1a1d27;
+        border-radius: 8px;
+        padding: 0.8rem 1.2rem;
+        color: #888;
+        font-size: 0.9rem;
+        border: 1px solid #2a2d3a;
+        text-align: center;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-        # 3. Build the prompt
-        prompt = f"""Answer the question based on the context below.
+# ── Header ────────────────────────────────────────────────────
+st.markdown('<div class="dashboard-title">🍎 Green-Grocer Quality Dashboard</div>', unsafe_allow_html=True)
+st.markdown('<div class="dashboard-sub">AI-powered fruit inspection system — Upload an image to begin analysis</div>', unsafe_allow_html=True)
 
-Context:
-{context}
+# ── Upload Section ────────────────────────────────────────────
+uploaded_file = st.file_uploader("", type=["jpg", "jpeg", "png", "webp"], label_visibility="collapsed")
 
-Question:
-{query}
+if uploaded_file is not None:
 
-Answer:
-"""
+    col_img, col_gap, col_info = st.columns([2, 0.2, 1.5])
 
-        # 4. Generate the result
-        result = pipe(prompt)[0]["generated_text"]
+    with col_img:
+        image = Image.open(uploaded_file)
+        st.image(image, caption='Uploaded Image', use_column_width=True)
 
-        # 5. Clean up the output 
-        # GPT-2 tends to repeat the prompt, so we split the string to only show the generated answer
-        try:
-            final_answer = result.split("Answer:")[1].strip()
-        except IndexError:
-            final_answer = result # Fallback just in case
+    with col_info:
+        st.markdown('<div class="section-header">📋 Scan Status</div>', unsafe_allow_html=True)
+        st.info("🔄 Sending to AI Engine...")
 
-        # Display results
-        st.write("### Answer:")
-        st.write(final_answer)
-        
-        # Optional: Add an expander to let the user see the retrieved legal text
-        with st.expander("View Retrieved Context"):
-            st.write(context)
+    # ── API Call ──────────────────────────────────────────────
+    try:
+        uploaded_file.seek(0)
+        files = {"file": ("image.jpg", uploaded_file.getvalue(), "image/jpeg")}
+        response = requests.post("http://127.0.0.1:8000/inspect", files=files, timeout=15)
+
+        if response.status_code == 200:
+            result = response.json()
+            detections = result["data"]["detections"]
+            summary   = result["data"]["summary"]
+            latency   = result["header"]["latency_seconds"]
+
+            # ── Batch Verdict ─────────────────────────────────
+            verdict_class = "verdict-pass" if "PASS" in summary["batch_verdict"] else "verdict-fail"
+            st.markdown(f'<div class="{verdict_class}">Batch Verdict: {summary["batch_verdict"]}</div>', unsafe_allow_html=True)
+
+            # ── Metric Cards ──────────────────────────────────
+            st.markdown('<div class="section-header">📊 Batch Summary</div>', unsafe_allow_html=True)
+            m1, m2, m3, m4, m5 = st.columns(5)
+
+            with m1:
+                st.markdown(f'''<div class="metric-card">
+                    <div class="metric-value">{summary["total_items"]}</div>
+                    <div class="metric-label">Total Detected</div>
+                </div>''', unsafe_allow_html=True)
+            with m2:
+                st.markdown(f'''<div class="metric-card">
+                    <div class="metric-value" style="color:#00ff88">{summary["grade_a_count"]}</div>
+                    <div class="metric-label">✅ Grade A</div>
+                </div>''', unsafe_allow_html=True)
+            with m3:
+                st.markdown(f'''<div class="metric-card">
+                    <div class="metric-value" style="color:#ffaa00">{summary["grade_b_count"]}</div>
+                    <div class="metric-label">⚠️ Grade B</div>
+                </div>''', unsafe_allow_html=True)
+            with m4:
+                st.markdown(f'''<div class="metric-card">
+                    <div class="metric-value" style="color:#ff4444">{summary["grade_c_count"]}</div>
+                    <div class="metric-label">❌ Grade C</div>
+                </div>''', unsafe_allow_html=True)
+            with m5:
+                st.markdown(f'''<div class="metric-card">
+                    <div class="metric-value">{summary["pass_rate_percent"]}%</div>
+                    <div class="metric-label">Pass Rate</div>
+                </div>''', unsafe_allow_html=True)
+
+            # ── Detection Table ───────────────────────────────
+            st.markdown('<div class="section-header">🔍 Individual Detections</div>', unsafe_allow_html=True)
+
+            for i, item in enumerate(detections):
+                grade = item["quality"]["grade"]
+                badge_class = "badge-a" if grade == "Grade A" else "badge-b" if grade == "Grade B" else "badge-c"
+
+                with st.expander(f"{item['quality']['status']}  {item['label'].title()}  #{i+1}  —  {item['confidence_pct']} confidence"):
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Grade", grade)
+                    c2.metric("Confidence", item["confidence_pct"])
+                    c3.metric("Action", item["quality"]["action"])
+                    st.caption(f"📦 Bounding Box: {item['box_coordinates']}")
+
+            # ── Latency ───────────────────────────────────────
+            st.markdown(f'<div class="latency-bar">⚡ AI Processing Time: {latency} seconds</div>', unsafe_allow_html=True)
+
+        else:
+            st.error(f"API Error {response.status_code}: {response.text}")
+
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Cannot reach Docker container. Make sure it is running on port 8000.")
+    except requests.exceptions.Timeout:
+        st.error("⏱️ Request timed out. The model may still be loading — wait 30 seconds and retry.")
